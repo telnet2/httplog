@@ -1,4 +1,4 @@
-module github.com/telnet2/tcp-echo
+module github.com/telnet2/httplog
 
 go 1.19
 
