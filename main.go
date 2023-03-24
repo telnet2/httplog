@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -39,10 +40,11 @@ func main() {
 			defer f.Close()
 			ww = f
 		}
+		ww.Write([]byte(fmt.Sprintf("%s %s%s %s\r\n", r.Method, r.Host, r.URL, r.Proto)))
 		r.Header.Write(ww)
 		ww.Write([]byte("\r\n"))
 		_, _ = io.Copy(ww, r.Body)
-		ww.Write([]byte("\r\n"))
+		ww.Write([]byte("\r\n\r\n"))
 		w.WriteHeader(http.StatusOK)
 	})
 
