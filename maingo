@@ -1,0 +1,103 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"os"
+	"path/filepath"
+	"runtime/debug"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/bytedance/gopkg/util/gopool"
+)
+
+var (
+	listen    string
+	outputDir string
+	verbose   bool
+)
+
+func main() {
+	flag.BoolVar(&verbose, "v", false, "print request to stdout")
+	flag.StringVar(&listen, "listen", ":8080", "listen address and port")
+	flag.StringVar(&outputDir, "output-dir", "", "directory to store the request")
+	flag.Parse()
+
+	l, err := net.Listen("tcp", listen)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("listening", listen)
+	gopool.SetPanicHandler(func(ctx context.Context, i interface{}) {
+		if i != nil {
+			log.Printf("panic: %v", i)
+			log.Printf("stack: %s", string(debug.Stack()))
+		}
+	})
+
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			log.Fatal(err)
+		}
+		ts := strconv.Itoa(int(time.Now().UnixNano()))
+		gopool.Go(func() {
+			defer conn.Close()
+
+			var f *os.File
+			if outputDir != "" {
+				f, err = os.Create(filepath.Join(outputDir, ts+".http"))
+				if err != nil {
+					log.Print(err)
+				}
+			}
+
+			var r io.Reader = conn
+			if f != nil {
+				r = io.TeeReader(conn, f)
+			}
+
+			contentLength := 0
+			scanner := bufio.NewScanner(r)
+			for scanner.Scan() {
+				var line string
+				if line = scanner.Text(); line == "" {
+					break
+				}
+				fmt.Println(line)
+				key, value, ok := strings.Cut(line, ":")
+				if ok {
+					if strings.EqualFold(key, "content-length") {
+						contentLength, _ = strconv.Atoi(strings.TrimSpace(value))
+					}
+				}
+			}
+
+			fmt.Println(contentLength)
+			if verbose {
+				_, _ = io.CopyN(os.Stdout, r, int64(contentLength))
+			} else {
+				_, _ = io.CopyN(io.Discard, r, int64(contentLength))
+			}
+
+			for scanner.Scan() {
+				line := scanner.Text()
+				fmt.Println("after:", line)
+				if line == "" {
+					break
+				}
+			}
+
+			conn.Write([]byte("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n"))
+		})
+
+	}
+}
